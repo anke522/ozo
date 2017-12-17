@@ -33,6 +33,8 @@ set(SOURCES
     type_traits.cpp
     connection.cpp
     connection_info.cpp
+    result.cpp
+    value.cpp
 )
 
 set(LIBRARIES
