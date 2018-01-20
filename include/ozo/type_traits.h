@@ -112,7 +112,7 @@ struct is_string<std::basic_string<C, T, A>> : std::true_type {};
 * Indicates if type is adapted for introspection with Boost.Fusion
 */
 template <typename T>
-using is_fusion_adapted = std::integral_constant<bool, 
+using is_fusion_adapted = std::integral_constant<bool,
     ::boost::fusion::traits::is_sequence<T>::value
 >;
 
@@ -126,7 +126,7 @@ using is_hana_adapted = std::integral_constant<bool,
 >;
 
 /**
-* Indicates if type is a composite. In general we suppose that composite 
+* Indicates if type is a composite. In general we suppose that composite
 * is a type being adapted for introspection via Boost.Fusion or Boost.Hana,
 * including tuples and compile-time sequences.
 */
@@ -315,5 +315,35 @@ template <typename T, typename Map>
 inline bool accepts_oid(const Map& map, const T& v, oid_t oid) noexcept {
     return type_oid(map, v) == oid;
 }
+
+/**
+* This trait determines whether T has begin and end
+* methods, which return forward iterators
+*/
+template <typename T, typename Enable = void>
+struct is_forward_iterator : std::false_type {};
+
+template <typename T>
+struct is_forward_iterator<T, typename std::enable_if<
+    std::is_base_of<
+        std::forward_iterator_tag,
+        typename std::iterator_traits<T>::iterator_category
+    >::value
+>::type>
+: std::true_type {};
+
+/**
+ * This trait determines whether T can be iterated through
+ * via begin() end() functions
+ */
+template <typename T, typename Enable = void>
+struct is_iterable : std::false_type {};
+
+template <typename T>
+struct is_iterable<T, typename std::enable_if<
+    is_forward_iterator<decltype(begin(std::declval<T>()))>::value &&
+        is_forward_iterator<decltype(end(std::declval<T>()))>::value
+>::type>
+: std::true_type {};
 
 } // namespace ozo
