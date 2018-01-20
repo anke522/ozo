@@ -34,6 +34,7 @@ set(SOURCES
     connection.cpp
     connection_info.cpp
     result.cpp
+    row.cpp
     value.cpp
 )
 
