@@ -1,3 +1,9 @@
+os:
+- linux
+- osx
+
+osx_image: xcode9.3beta
+
 language: cpp
 
 sudo: required
@@ -15,35 +21,80 @@ services:
 
 matrix:
   include:
-  - before_install: &before_install
-    - sed -i 's;git@github.com:;https://github.com/;' .gitmodules
-    - git submodule update --init
-    - git submodule foreach --recursive "sed -i 's;git@github.com:;https://github.com/;' .gitmodules; git submodule update --init"
-    - docker pull ubuntu:17.10
-    - scripts/build_docker_image_build.sh
-    env: BUILD_SCRIPT=scripts/build_gcc_debug.sh
-
-  - before_install: *before_install
-    env: BUILD_SCRIPT=scripts/build_gcc_rel_with_deb_info.sh
-
-  - before_install: *before_install
-    env: BUILD_SCRIPT=scripts/build_clang_debug.sh
-
-  - before_install: *before_install
+  - os: osx
     env: BUILD_SCRIPT=scripts/build_clang_rel_with_deb_info.sh
+    before_install:
+    - cat .gitmodules | sed 's;git@github.com:;https://github.com/;' > .gitmodules~
+    - mv .gitmodules~ .gitmodules
+    - git submodule update --init
+    install:
+    - brew install libpq ccache boost llvm
+    script:
+    - mkdir build
+    - cd build
+    - cmake -DCMAKE_CXX_FLAGS='-std=c++17 -Wall -Wextra -pedantic -Werror' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOZO_BUILD_TESTS=ON ..
+    - make -j$(nproc)
+    - cat /Users/travis/build/YandexMail/ozo/build/tests/GUnit-prefix/src/GUnit-stamp/GUnit-build-*.log
+    - ctest -V
 
-  - before_install: *before_install
-    env: BUILD_SCRIPT=scripts/build_clang_asan.sh
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_gcc_debug.sh
 
-  - before_install: *before_install
-    env: BUILD_SCRIPT=scripts/build_clang_ubsan.sh
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_gcc_rel_with_deb_info.sh
 
-  - before_install: *before_install
-    env: BUILD_SCRIPT=scripts/build_gcc_coverage.sh
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_gcc_coverage.sh
 
-script:
-- scripts/build_inside_docker_container.sh ${BUILD_SCRIPT}
-- |
-  if [[ "${BUILD_SCRIPT}" = "scripts/build_gcc_coverage.sh" ]]; then
-    scripts/build_inside_docker_container.sh coveralls --include include/ozo
-  fi
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_clang_debug.sh
+
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_clang_rel_with_deb_info.sh
+
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_clang_asan.sh
+
+  # - os: linux
+  #   env: BUILD_SCRIPT=scripts/build_clang_ubsan.sh
+
+  exclude:
+  - os: linux
+  - os: osx
+
+before_install:
+# - |
+#   set -e
+#   if [[ "${TRAVIS_OS_NAME}" = "linux" ]]; then
+#     sed -i 's;git@github.com:;https://github.com/;' .gitmodules
+#   fi
+# - |
+#   set -e
+#   if [[ "${TRAVIS_OS_NAME}" = "osx" ]]; then
+#     cat .gitmodules | sed 's;git@github.com:;https://github.com/;' > .gitmodules~
+#     mv .gitmodules~ .gitmodules
+#   fi
+- git submodule update --init
+
+# install:
+# - |
+#   set -e
+#   if [[ "${TRAVIS_OS_NAME}" = "linux" ]]; then
+#     docker pull ubuntu:17.10
+#     scripts/build_docker_image_build.sh
+#   fi
+
+# script:
+# - |
+#   set -e
+#   if [[ "${TRAVIS_OS_NAME}" = "linux" ]]; then
+#     scripts/build_inside_docker_container.sh ${BUILD_SCRIPT}
+#     if [[ "${BUILD_SCRIPT}" = "scripts/build_gcc_coverage.sh" ]]; then
+#       scripts/build_inside_docker_container.sh coveralls --include include/ozo
+#     fi
+#   fi
+# - |
+#   set -e
+#   if [[ "${TRAVIS_OS_NAME}" = "osx" ]]; then
+#     ${BUILD_SCRIPT}
+#   fi
