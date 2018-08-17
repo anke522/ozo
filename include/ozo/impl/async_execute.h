@@ -9,11 +9,14 @@ template <typename P, typename Q, typename Handler>
 void async_execute(P&& provider, Q&& query, Handler&& handler) {
     static_assert(ConnectionProvider<P>, "is not a ConnectionProvider");
     static_assert(Query<Q> || QueryBuilder<Q>, "is neither Query nor QueryBuilder");
-    async_get_connection(std::forward<P>(provider),
-        impl::make_async_request_op(
-            std::forward<Q>(query),
-            [] (auto, auto) {},
-            std::forward<Handler>(handler)
+    async_get_connection(
+        std::forward<P>(provider),
+        make_async_request_op(
+            make_request_operation_context(
+                std::forward<Q>(query),
+                [] (auto, auto) {},
+                std::forward<Handler>(handler)
+            )
         )
     );
 }

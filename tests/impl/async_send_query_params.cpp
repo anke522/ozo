@@ -16,6 +16,41 @@ using namespace ozo::tests;
 using callback_mock = callback_gmock<connection_ptr<>>;
 
 struct fixture {
+    struct context {
+        connection_ptr<> conn;
+        callback_handler<callback_mock> handler;
+        using strand_type = ozo::strand<decltype(get_io_context(conn))>;
+        strand_type strand {get_io_context(conn)};
+        ozo::impl::query_state state = ozo::impl::query_state::send_in_progress;
+
+        context(connection_ptr<> conn, callback_handler<callback_mock> handler)
+                : conn(std::move(conn)), handler(std::move(handler)) {}
+
+        friend auto& get_connection(const std::shared_ptr<context>& value) noexcept {
+            return value->conn;
+        }
+
+        friend decltype(auto) get_handler_context(const std::shared_ptr<context>& value) noexcept {
+            return std::addressof(value->handler);
+        }
+
+        friend ozo::impl::query_state get_query_state(const std::shared_ptr<context>& value) noexcept {
+            return value->state;
+        }
+
+        friend void set_query_state(const std::shared_ptr<context>& value, ozo::impl::query_state state) noexcept {
+            value->state = state;
+        }
+
+        friend auto& get_executor(const std::shared_ptr<context>& value) noexcept {
+            return value->strand;
+        }
+
+        friend auto& get_handler(const std::shared_ptr<context>& value) noexcept {
+            return value->handler;
+        }
+    };
+
     StrictMock<connection_gmock> connection{};
     StrictMock<callback_mock> callback{};
     StrictMock<executor_gmock> executor{};
@@ -25,13 +60,12 @@ struct fixture {
     io_context io{executor, strand_service};
     decltype(make_connection(connection, io, socket)) conn =
             make_connection(connection, io, socket);
+    std::shared_ptr<context> ctx;
 
     auto make_operation_context() {
         EXPECT_CALL(strand_service, get_executor()).WillOnce(ReturnRef(strand));
-        return ozo::impl::make_request_operation_context(conn, wrap(callback));
+        return std::make_shared<context>(conn, wrap(callback));
     }
-
-    decltype(ozo::impl::make_request_operation_context(conn, wrap(callback))) ctx;
 
     fixture() : ctx(make_operation_context()) {}
 

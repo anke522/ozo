@@ -4,58 +4,67 @@
 #include <ozo/binary_query.h>
 #include <ozo/query_builder.h>
 #include <ozo/binary_deserialization.h>
+#include <ozo/time_traits.h>
 #include <ozo/impl/io.h>
 
 namespace ozo {
 namespace impl {
 
-template <typename Connection, typename Handler>
+template <typename Query, typename OutHandler, typename Handler>
 struct request_operation_context {
-    std::decay_t<Connection> conn;
-    std::decay_t<Handler> handler;
-    using strand_type = ozo::strand<decltype(get_io_context(conn))>;
-    strand_type strand{get_io_context(conn)};
-    query_state state = query_state::send_in_progress;
+    Query query;
+    OutHandler out;
+    Handler handler;
 
-    request_operation_context(Connection conn, Handler handler)
-      : conn(std::forward<Connection>(conn)),
-        handler(std::forward<Handler>(handler)) {}
+    request_operation_context(Query query, OutHandler out, Handler handler)
+            : query(std::move(query)),
+              out(std::move(out)),
+              handler(std::move(handler)) {}
 };
-
-template <typename Connection, typename Handler>
-decltype(auto) make_request_operation_context(Connection&& conn, Handler&& h) {
-    return std::make_shared<request_operation_context<Connection, Handler>>(
-        std::forward<Connection>(conn), std::forward<Handler>(h)
-    );
-}
 
 template <typename ...Ts>
 using request_operation_context_ptr = std::shared_ptr<request_operation_context<Ts...>>;
 
-template <typename ...Ts>
-auto& get_connection(const request_operation_context_ptr<Ts...>& ctx) noexcept {
-    return ctx->conn;
+template <typename Query, typename OutHandler, typename Handler>
+decltype(auto) make_request_operation_context(Query&& query, OutHandler&& out, Handler&& handler) {
+    using context_type = request_operation_context<
+        std::decay_t<Query>,
+        std::decay_t<OutHandler>,
+        std::decay_t<Handler>
+    >;
+    return std::make_shared<context_type>(
+        std::forward<Query>(query),
+        std::forward<OutHandler>(out),
+        std::forward<Handler>(handler)
+    );
 }
 
-template <typename ...Ts>
-decltype(auto) get_handler_context(const request_operation_context_ptr<Ts...>& ctx) noexcept {
-    return std::addressof(ctx->handler);
-}
+template <typename NestedContext, typename Connection>
+struct request_on_connected_operation_context {
+    NestedContext nested_context;
+    Connection conn;
+    using strand_type = ozo::strand<decltype(get_io_context(conn))>;
+    strand_type strand {get_io_context(conn)};
+    query_state state = query_state::send_in_progress;
+
+    request_on_connected_operation_context(NestedContext nested_context, Connection conn)
+            : nested_context(std::move(nested_context)),
+              conn(std::move(conn)) {}
+};
 
 template <typename ...Ts>
-query_state get_query_state(const request_operation_context_ptr<Ts...>& ctx) noexcept {
-    return ctx->state;
-}
+using request_on_connected_operation_context_ptr = std::shared_ptr<request_on_connected_operation_context<Ts...>>;
 
-template <typename ...Ts>
-void set_query_state(const request_operation_context_ptr<Ts...>& ctx,
-        query_state state) noexcept {
-    ctx->state = state;
-}
-
-template <typename ... Ts>
-auto& get_executor(const request_operation_context_ptr<Ts ...>& context) noexcept {
-    return context->strand;
+template <typename NestedContext, typename Connection>
+decltype(auto) make_request_on_connected_operation_context(NestedContext&& nested_context, Connection&& conn) {
+    using context_type = request_on_connected_operation_context<
+        std::decay_t<NestedContext>,
+        std::decay_t<Connection>
+    >;
+    return std::make_shared<context_type>(
+        std::forward<NestedContext>(nested_context),
+        std::forward<Connection>(conn)
+    );
 }
 
 template <typename ... Ts>
@@ -63,19 +72,69 @@ auto& get_query(const request_operation_context_ptr<Ts ...>& context) noexcept {
     return context->query;
 }
 
+template <typename ...Ts>
+auto& get_out_handler(const request_operation_context_ptr<Ts...>& context) noexcept {
+    return context->out;
+}
+
 template <typename ... Ts>
 auto& get_handler(const request_operation_context_ptr<Ts ...>& context) noexcept {
     return context->handler;
 }
 
-template <typename Oper, typename ...Ts>
-void post(const request_operation_context_ptr<Ts...>& ctx, Oper&& op) {
-    post(get_connection(ctx),
-        bind_executor(get_executor(ctx), std::forward<Oper>(op)));
+template <typename ...Ts>
+decltype(auto) get_handler_context(const request_operation_context_ptr<Ts...>& context) noexcept {
+    return std::addressof(context->handler);
+}
+
+template <typename ... Ts>
+auto& get_query(const request_on_connected_operation_context_ptr<Ts ...>& context) noexcept {
+    return get_query(context->nested_context);
 }
 
 template <typename ...Ts>
-void done(const request_operation_context_ptr<Ts...>& ctx, error_code ec) {
+auto& get_out_handler(const request_on_connected_operation_context_ptr<Ts...>& context) noexcept {
+    return get_out_handler(context->nested_context);
+}
+
+template <typename ... Ts>
+auto& get_handler(const request_on_connected_operation_context_ptr<Ts ...>& context) noexcept {
+    return get_handler(context->nested_context);
+}
+
+template <typename ...Ts>
+decltype(auto) get_handler_context(const request_on_connected_operation_context_ptr<Ts...>& ctx) noexcept {
+    return get_handler_context(ctx->nested_context);
+}
+
+template <typename ...Ts>
+auto& get_connection(const request_on_connected_operation_context_ptr<Ts...>& context) noexcept {
+    return context->conn;
+}
+
+template <typename ...Ts>
+query_state get_query_state(const request_on_connected_operation_context_ptr<Ts...>& context) noexcept {
+    return context->state;
+}
+
+template <typename ...Ts>
+void set_query_state(const request_on_connected_operation_context_ptr<Ts...>& context, query_state state) noexcept {
+    context->state = state;
+}
+
+template <typename ... Ts>
+auto& get_executor(const request_on_connected_operation_context_ptr<Ts ...>& context) noexcept {
+    return context->strand;
+}
+
+template <typename Context, typename Oper>
+void post(const Context& ctx, Oper&& op) {
+    using asio::bind_executor;
+    post(get_connection(ctx), bind_executor(get_executor(ctx), std::forward<Oper>(op)));
+}
+
+template <typename Context>
+void done(const Context& ctx, error_code ec) {
     set_query_state(ctx, query_state::error);
     decltype(auto) conn = get_connection(ctx);
     error_code _;
@@ -83,19 +142,19 @@ void done(const request_operation_context_ptr<Ts...>& ctx, error_code ec) {
     post(ctx, detail::bind(get_handler(ctx), std::move(ec), conn));
 }
 
-template <typename ...Ts>
-void done(const request_operation_context_ptr<Ts...>& ctx) {
+template <typename Context>
+void done(const Context& ctx) {
     post(ctx, detail::bind(get_handler(ctx), error_code{}, get_connection(ctx)));
 }
 
-template <typename Continuation, typename ...Ts>
-void write_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
+template <typename Context, typename Continuation>
+void write_poll(const Context& ctx, Continuation&& c) {
     using asio::bind_executor;
     write_poll(get_connection(ctx), bind_executor(get_executor(ctx), std::forward<Continuation>(c)));
 }
 
-template <typename Continuation, typename ...Ts>
-void read_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
+template <typename Context, typename Continuation>
+void read_poll(const Context& ctx, Continuation&& c) {
     using asio::bind_executor;
     read_poll(get_connection(ctx), bind_executor(get_executor(ctx), std::forward<Continuation>(c)));
 }
@@ -165,12 +224,12 @@ decltype(auto) make_binary_query(const query_builder<Ts...>& builder, const oid_
     return make_binary_query(builder.build(), m);
 }
 
-template <typename Context, typename Query>
-void async_send_query_params(std::shared_ptr<Context> ctx, Query&& query) {
-    auto q = make_binary_query(std::forward<Query>(query),
-                        get_oid_map(get_connection(ctx)));
-
-    make_async_send_query_params_op(std::move(ctx), std::move(q)).perform();
+template <typename Context, typename BinaryQuery>
+void async_send_query_params(Context&& ctx, BinaryQuery&& binary_query) {
+    make_async_send_query_params_op(
+        std::forward<Context>(ctx),
+        std::forward<BinaryQuery>(binary_query)
+    ).perform();
 }
 
 #include <boost/asio/yield.hpp>
@@ -181,7 +240,7 @@ struct async_get_result_op : boost::asio::coroutine {
     ResultProcessor process_;
 
     async_get_result_op(Context ctx, ResultProcessor process)
-    : ctx_(ctx), process_(process) {}
+        : ctx_(std::move(ctx)), process_(std::move(process)) {}
 
     void perform() {
         post(ctx_, *this);
@@ -287,36 +346,8 @@ auto make_async_get_result_op(Context&& ctx, ResultProcessor&& process) {
 
 template <typename Context, typename ResultProcessor>
 void async_get_result(Context&& ctx, ResultProcessor&& process) {
-    make_async_get_result_op(
-        std::forward<Context>(ctx),
-        std::forward<ResultProcessor>(process)
-    ).perform();
+    make_async_get_result_op(std::forward<Context>(ctx), std::forward<ResultProcessor>(process)).perform();
 }
-
-template <typename OutHandler, typename Query, typename Handler>
-struct async_request_op {
-    OutHandler out_;
-    Query query_;
-    Handler handler_;
-
-    template <typename Connection>
-    void operator() (error_code ec, Connection conn) {
-        if (ec) {
-            return handler_(ec, std::move(conn));
-        }
-
-        auto ctx = make_request_operation_context(std::move(conn), std::move(handler_));
-
-        async_send_query_params(ctx, std::move(query_));
-        async_get_result(std::move(ctx), std::move(out_));
-    }
-
-    template <typename Func>
-    friend void asio_handler_invoke(Func&& f, async_request_op* ctx) {
-        using boost::asio::asio_handler_invoke;
-        asio_handler_invoke(std::forward<Func>(f), std::addressof(ctx->handler_));
-    }
-};
 
 template <typename T>
 struct async_request_out_handler {
@@ -334,29 +365,48 @@ auto make_async_request_out_handler(T&& out) {
     return async_request_out_handler<std::decay_t<T>> {std::forward<T>(out)};
 }
 
-template <typename Query, typename OutHandler, typename Handler>
-auto make_async_request_op(Query&& query, OutHandler&& out, Handler&& handler) {
-    using result_type = impl::async_request_op<
-        std::decay_t<OutHandler>,
-        std::decay_t<Query>,
-        std::decay_t<Handler>
-    >;
-    return result_type {
-        std::forward<OutHandler>(out),
-        std::forward<Query>(query),
-        std::forward<Handler>(handler)
-    };
+template <typename Context>
+struct async_request_op {
+    Context context;
+
+    template <typename Connection>
+    void operator() (error_code ec, Connection conn) {
+        if (ec) {
+            return std::move(get_handler(context))(ec, std::move(conn));
+        }
+
+        const auto upper_context = make_request_on_connected_operation_context(context, std::move(conn));
+
+        async_send_query_params(upper_context,
+            make_binary_query(std::move(get_query(upper_context)), get_oid_map(get_connection(upper_context))));
+
+        async_get_result(upper_context, get_out_handler(upper_context));
+    }
+
+    template <typename Function>
+    friend void asio_handler_invoke(Function&& function, async_request_op* ctx) {
+        using boost::asio::asio_handler_invoke;
+        asio_handler_invoke(std::forward<Function>(function), get_handler_context(ctx->context));
+    }
+};
+
+template <typename Context>
+auto make_async_request_op(Context&& context) {
+    return async_request_op<std::decay_t<Context>> {std::forward<Context>(context)};
 }
 
 template <typename P, typename Q, typename Out, typename Handler>
 void async_request(P&& provider, Q&& query, Out&& out, Handler&& handler) {
     static_assert(ConnectionProvider<P>, "is not a ConnectionProvider");
     static_assert(Query<Q> || QueryBuilder<Q>, "is neither Query nor QueryBuilder");
-    async_get_connection(std::forward<P>(provider),
-        impl::make_async_request_op(
-            std::forward<Q>(query),
-            make_async_request_out_handler(std::forward<Out>(out)),
-            std::forward<Handler>(handler)
+    async_get_connection(
+        std::forward<P>(provider),
+        make_async_request_op(
+            make_request_operation_context(
+                std::forward<Q>(query),
+                make_async_request_out_handler(std::forward<Out>(out)),
+                std::forward<Handler>(handler)
+            )
         )
     );
 }
