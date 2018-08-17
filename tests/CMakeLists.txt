@@ -75,6 +75,7 @@ set(SOURCES
     detail/base36.cpp
     impl/request_oid_map.cpp
     impl/request_oid_map_handler.cpp
+    impl/async_request.cpp
     main.cpp
 )
 

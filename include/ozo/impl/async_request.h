@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ozo/impl/timeout_handler.h>
 #include <ozo/connection.h>
 #include <ozo/binary_query.h>
 #include <ozo/query_builder.h>
@@ -13,11 +14,13 @@ namespace impl {
 template <typename Query, typename OutHandler, typename Handler>
 struct request_operation_context {
     Query query;
+    time_traits::duration timeout;
     OutHandler out;
     Handler handler;
 
-    request_operation_context(Query query, OutHandler out, Handler handler)
+    request_operation_context(Query query, const time_traits::duration& timeout, OutHandler out, Handler handler)
             : query(std::move(query)),
+              timeout(timeout),
               out(std::move(out)),
               handler(std::move(handler)) {}
 };
@@ -26,7 +29,8 @@ template <typename ...Ts>
 using request_operation_context_ptr = std::shared_ptr<request_operation_context<Ts...>>;
 
 template <typename Query, typename OutHandler, typename Handler>
-decltype(auto) make_request_operation_context(Query&& query, OutHandler&& out, Handler&& handler) {
+decltype(auto) make_request_operation_context(Query&& query, const time_traits::duration& timeout,
+        OutHandler&& out, Handler&& handler) {
     using context_type = request_operation_context<
         std::decay_t<Query>,
         std::decay_t<OutHandler>,
@@ -34,42 +38,57 @@ decltype(auto) make_request_operation_context(Query&& query, OutHandler&& out, H
     >;
     return std::make_shared<context_type>(
         std::forward<Query>(query),
+        timeout,
         std::forward<OutHandler>(out),
         std::forward<Handler>(handler)
     );
 }
 
-template <typename NestedContext, typename Connection>
+template <typename NestedContext, typename Connection, typename Timer>
 struct request_on_connected_operation_context {
     NestedContext nested_context;
     Connection conn;
+    Timer timer;
     using strand_type = ozo::strand<decltype(get_io_context(conn))>;
     strand_type strand {get_io_context(conn)};
     query_state state = query_state::send_in_progress;
 
-    request_on_connected_operation_context(NestedContext nested_context, Connection conn)
+    request_on_connected_operation_context(NestedContext nested_context, Connection conn, Timer timer)
             : nested_context(std::move(nested_context)),
-              conn(std::move(conn)) {}
+              conn(std::move(conn)),
+              timer(std::move(timer)) {}
 };
 
 template <typename ...Ts>
 using request_on_connected_operation_context_ptr = std::shared_ptr<request_on_connected_operation_context<Ts...>>;
 
-template <typename NestedContext, typename Connection>
-decltype(auto) make_request_on_connected_operation_context(NestedContext&& nested_context, Connection&& conn) {
+template <typename NestedContext, typename Connection, typename Timer>
+decltype(auto) make_request_on_connected_operation_context(NestedContext&& nested_context, Connection&& conn,
+        Timer&& timer) {
     using context_type = request_on_connected_operation_context<
         std::decay_t<NestedContext>,
-        std::decay_t<Connection>
+        std::decay_t<Connection>,
+        std::decay_t<Timer>
     >;
     return std::make_shared<context_type>(
         std::forward<NestedContext>(nested_context),
-        std::forward<Connection>(conn)
+        std::forward<Connection>(conn),
+        std::forward<Timer>(timer)
     );
+}
+
+inline auto make_timer(asio::io_context& io) {
+    return asio::steady_timer(io);
 }
 
 template <typename ... Ts>
 auto& get_query(const request_operation_context_ptr<Ts ...>& context) noexcept {
     return context->query;
+}
+
+template <typename ... Ts>
+auto& get_timeout(const request_operation_context_ptr<Ts ...>& context) noexcept {
+    return context->timeout;
 }
 
 template <typename ...Ts>
@@ -110,6 +129,11 @@ decltype(auto) get_handler_context(const request_on_connected_operation_context_
 template <typename ...Ts>
 auto& get_connection(const request_on_connected_operation_context_ptr<Ts...>& context) noexcept {
     return context->conn;
+}
+
+template <typename ... Ts>
+auto& get_timer(const request_on_connected_operation_context_ptr<Ts ...>& context) noexcept {
+    return context->timer;
 }
 
 template <typename ...Ts>
@@ -246,6 +270,17 @@ struct async_get_result_op : boost::asio::coroutine {
         post(ctx_, *this);
     }
 
+    void done() {
+        get_timer(ctx_).cancel();
+        return impl::done(ctx_);
+    }
+
+    void done(error_code ec) {
+        set_error_context(get_connection(ctx_), "error while get request result");
+        get_timer(ctx_).cancel();
+        return impl::done(ctx_, ec);
+    }
+
     void operator() (error_code ec = error_code{}, std::size_t = 0) {
         // In case when query error state has been set by send query params
         // operation skip handle and do nothing more.
@@ -259,14 +294,14 @@ struct async_get_result_op : boost::asio::coroutine {
             if (ec == asio::error::bad_descriptor) {
                 ec = asio::error::operation_aborted;
             }
-            return done(ctx_, ec);
+            return done(ec);
         }
 
         reenter(*this) {
             while (is_busy(get_connection(ctx_))) {
                 yield read_poll(ctx_, *this);
                 if (auto err = consume_input(get_connection(ctx_))) {
-                    return done(ctx_, err);
+                    return done(err);
                 }
             }
 
@@ -281,19 +316,19 @@ struct async_get_result_op : boost::asio::coroutine {
                         consume_result(get_connection(ctx_));
                         return;
                     case PGRES_COMMAND_OK:
-                        done(ctx_);
+                        done();
                         consume_result(get_connection(ctx_));
                         return;
                     case PGRES_BAD_RESPONSE:
-                        done(ctx_, error::result_status_bad_response);
+                        done(error::result_status_bad_response);
                         consume_result(get_connection(ctx_));
                         return;
                     case PGRES_EMPTY_QUERY:
-                        done(ctx_, error::result_status_empty_query);
+                        done(error::result_status_empty_query);
                         consume_result(get_connection(ctx_));
                         return;
                     case PGRES_FATAL_ERROR:
-                        done(ctx_, result_error(*res));
+                        done(result_error(*res));
                         consume_result(get_connection(ctx_));
                         return;
                     case PGRES_COPY_OUT:
@@ -303,10 +338,10 @@ struct async_get_result_op : boost::asio::coroutine {
                         break;
                 }
                 set_error_context(get_connection(ctx_), get_result_status_name(status));
-                done(ctx_, error::result_status_unexpected);
+                done(error::result_status_unexpected);
                 consume_result(get_connection(ctx_));
             } else {
-                done(ctx_);
+                done();
             }
         }
     }
@@ -317,9 +352,9 @@ struct async_get_result_op : boost::asio::coroutine {
             process_(std::forward<Result>(res), get_connection(ctx_));
         } catch (const std::exception& e) {
             set_error_context(get_connection(ctx_), e.what());
-            return done(ctx_, error::bad_result_process);
+            return done(error::bad_result_process);
         }
-        done(ctx_);
+        done();
     }
 
     template <typename Connection>
@@ -375,7 +410,12 @@ struct async_request_op {
             return std::move(get_handler(context))(ec, std::move(conn));
         }
 
-        const auto upper_context = make_request_on_connected_operation_context(context, std::move(conn));
+        const auto upper_context = make_request_on_connected_operation_context(context, std::move(conn),
+            make_timer(get_io_context(conn)));
+
+        get_timer(upper_context).expires_after(get_timeout(context));
+        get_timer(upper_context).async_wait(bind_executor(get_executor(upper_context),
+            make_timeout_handler(get_socket(get_connection(upper_context)))));
 
         async_send_query_params(upper_context,
             make_binary_query(std::move(get_query(upper_context)), get_oid_map(get_connection(upper_context))));
@@ -396,7 +436,7 @@ auto make_async_request_op(Context&& context) {
 }
 
 template <typename P, typename Q, typename Out, typename Handler>
-void async_request(P&& provider, Q&& query, Out&& out, Handler&& handler) {
+void async_request(P&& provider, Q&& query, const time_traits::duration& timeout, Out&& out, Handler&& handler) {
     static_assert(ConnectionProvider<P>, "is not a ConnectionProvider");
     static_assert(Query<Q> || QueryBuilder<Q>, "is neither Query nor QueryBuilder");
     async_get_connection(
@@ -404,6 +444,7 @@ void async_request(P&& provider, Q&& query, Out&& out, Handler&& handler) {
         make_async_request_op(
             make_request_operation_context(
                 std::forward<Q>(query),
+                timeout,
                 make_async_request_out_handler(std::forward<Out>(out)),
                 std::forward<Handler>(handler)
             )

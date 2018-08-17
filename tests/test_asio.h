@@ -48,9 +48,13 @@ struct strand_executor_service_gmock : strand_executor_service_mock {
     MOCK_CONST_METHOD0(get_executor, executor_mock& ());
 };
 
+struct steady_timer_mock;
+struct steady_timer;
+
 struct io_context {
     executor_mock& executor_;
     strand_executor_service_mock& strand_;
+    steady_timer_mock* timer_ = nullptr;
 
     template <typename Handler>
     void post(Handler&& h) {
@@ -61,6 +65,8 @@ struct io_context {
     void dispatch(Handler&& h) {
         ozo::tests::dispatch(executor_, std::forward<Handler>(h));
     }
+
+    steady_timer make_timer();
 };
 
 struct strand {
@@ -187,6 +193,14 @@ struct steady_timer {
         return impl.cancel();
     }
 };
+
+inline steady_timer io_context::make_timer() {
+    return steady_timer {*timer_};
+}
+
+inline auto make_timer(io_context& io) {
+    return io.make_timer();
+}
 
 } // namespace tests
 

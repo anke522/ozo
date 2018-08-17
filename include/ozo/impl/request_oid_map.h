@@ -54,8 +54,14 @@ struct request_oid_map_op {
     std::shared_ptr<oids_result> res_;
 
     template <typename Connection>
-    void perform(Connection&& conn) {
-        async_request(std::forward<Connection>(conn), make_oids_query(get_oid_map(conn)), std::back_inserter(*res_), *this);
+    void perform(Connection&& conn, const time_traits::duration& timeout) {
+        async_request(
+            std::forward<Connection>(conn),
+            make_oids_query(get_oid_map(conn)),
+            timeout,
+            std::back_inserter(*res_),
+            *this
+        );
     }
 
     template <typename Connection>

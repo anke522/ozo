@@ -133,9 +133,9 @@ inline auto make_async_connect_op(Context&& context) {
 }
 
 template <typename Connection, typename Handler>
-inline void request_oid_map(Connection&& conn, Handler&& handler) {
+inline void request_oid_map(Connection&& conn, const time_traits::duration& timeout, Handler&& handler) {
     make_async_request_oid_map_op(std::forward<Handler>(handler))
-        .perform(std::forward<Connection>(conn));
+        .perform(std::forward<Connection>(conn), timeout);
 }
 
 template <typename Timer, typename Handler>
@@ -158,6 +158,7 @@ auto make_cancel_timer_handler(std::shared_ptr<Timer> timer, Handler&& handler) 
 template <typename Timer, typename Handler>
 struct request_oid_map_handler {
     std::shared_ptr<Timer> timer_;
+    time_traits::duration timeout_;
     Handler handler_;
 
     template <typename Connection>
@@ -168,6 +169,7 @@ struct request_oid_map_handler {
         } else {
             request_oid_map(
                 std::forward<Connection>(conn),
+                timeout_,
                 make_cancel_timer_handler(std::move(timer_), std::move(handler_))
             );
         }
@@ -181,9 +183,9 @@ struct request_oid_map_handler {
 };
 
 template <typename Timer, typename Handler>
-auto make_request_oid_map_handler(std::shared_ptr<Timer> timer, Handler&& handler) {
+auto make_request_oid_map_handler(std::shared_ptr<Timer> timer, const time_traits::duration& timeout, Handler&& handler) {
     using result_type = request_oid_map_handler<Timer, std::decay_t<Handler>>;
-    return result_type {std::move(timer), std::forward<Handler>(handler)};
+    return result_type {std::move(timer), timeout, std::forward<Handler>(handler)};
 }
 
 template <typename ConnectionT, typename Handler>
@@ -195,6 +197,7 @@ inline Require<Connection<ConnectionT>> async_connect(std::string conninfo, cons
             std::forward<ConnectionT>(connection),
             make_request_oid_map_handler(
                 timer,
+                time_traits::duration::max(),
                 std::forward<Handler>(handler)
             ),
             timer

@@ -37,7 +37,7 @@ struct connection_wrapper {
     }
 
     template <typename Handler>
-    friend void request_oid_map(connection_wrapper c, Handler&&) {
+    friend void request_oid_map(connection_wrapper c, const time_traits::duration&, Handler&&) {
         c.mock_.request_oid_map();
     }
 };
@@ -46,6 +46,7 @@ struct request_oid_map_handler : Test {
     StrictMock<connection_mock> connection {};
     StrictMock<steady_timer_gmock> timer {};
     std::shared_ptr<steady_timer> timer_wrapper = std::make_shared<steady_timer>(steady_timer {timer});
+    const ozo::time_traits::duration timeout {0};
 
     template <typename OidMap>
     auto make_connection(OidMap oid_map) {
@@ -64,7 +65,7 @@ TEST_F(request_oid_map_handler, should_request_for_oid_when_oid_map_is_not_empty
 
     EXPECT_CALL(connection, request_oid_map()).WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error_code{}, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, timeout, wrap(callback))(error_code{}, std::move(conn));
 }
 
 TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_is_not_empty_but_error_occured) {
@@ -75,7 +76,7 @@ TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_is_not_e
     EXPECT_CALL(callback, call(error_code{error::error}, _))
         .WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error::error, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, timeout, wrap(callback))(error::error, std::move(conn));
 }
 
 TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_ist_empty) {
@@ -85,7 +86,7 @@ TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_ist_empt
     EXPECT_CALL(timer, cancel()).WillOnce(Return(1));
     EXPECT_CALL(callback, call(error_code{}, _)).WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error_code{}, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, timeout, wrap(callback))(error_code{}, std::move(conn));
 }
 
 } // namespace
