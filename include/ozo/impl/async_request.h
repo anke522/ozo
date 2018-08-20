@@ -23,7 +23,7 @@ struct request_operation_context {
 };
 
 template <typename Connection, typename Handler>
-inline decltype(auto) make_request_operation_context(Connection&& conn, Handler&& h) {
+decltype(auto) make_request_operation_context(Connection&& conn, Handler&& h) {
     return std::make_shared<request_operation_context<Connection, Handler>>(
         std::forward<Connection>(conn), std::forward<Handler>(h)
     );
@@ -33,22 +33,22 @@ template <typename ...Ts>
 using request_operation_context_ptr = std::shared_ptr<request_operation_context<Ts...>>;
 
 template <typename ...Ts>
-inline auto& get_connection(const request_operation_context_ptr<Ts...>& ctx) noexcept {
+auto& get_connection(const request_operation_context_ptr<Ts...>& ctx) noexcept {
     return ctx->conn;
 }
 
 template <typename ...Ts>
-inline decltype(auto) get_handler_context(const request_operation_context_ptr<Ts...>& ctx) noexcept {
+decltype(auto) get_handler_context(const request_operation_context_ptr<Ts...>& ctx) noexcept {
     return std::addressof(ctx->handler);
 }
 
 template <typename ...Ts>
-inline query_state get_query_state(const request_operation_context_ptr<Ts...>& ctx) noexcept {
+query_state get_query_state(const request_operation_context_ptr<Ts...>& ctx) noexcept {
     return ctx->state;
 }
 
 template <typename ...Ts>
-inline void set_query_state(const request_operation_context_ptr<Ts...>& ctx,
+void set_query_state(const request_operation_context_ptr<Ts...>& ctx,
         query_state state) noexcept {
     ctx->state = state;
 }
@@ -69,13 +69,13 @@ auto& get_handler(const request_operation_context_ptr<Ts ...>& context) noexcept
 }
 
 template <typename Oper, typename ...Ts>
-inline void post(const request_operation_context_ptr<Ts...>& ctx, Oper&& op) {
+void post(const request_operation_context_ptr<Ts...>& ctx, Oper&& op) {
     post(get_connection(ctx),
         bind_executor(get_executor(ctx), std::forward<Oper>(op)));
 }
 
 template <typename ...Ts>
-inline void done(const request_operation_context_ptr<Ts...>& ctx, error_code ec) {
+void done(const request_operation_context_ptr<Ts...>& ctx, error_code ec) {
     set_query_state(ctx, query_state::error);
     decltype(auto) conn = get_connection(ctx);
     error_code _;
@@ -84,18 +84,18 @@ inline void done(const request_operation_context_ptr<Ts...>& ctx, error_code ec)
 }
 
 template <typename ...Ts>
-inline void done(const request_operation_context_ptr<Ts...>& ctx) {
+void done(const request_operation_context_ptr<Ts...>& ctx) {
     post(ctx, detail::bind(get_handler(ctx), error_code{}, get_connection(ctx)));
 }
 
 template <typename Continuation, typename ...Ts>
-inline void write_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
+void write_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
     using asio::bind_executor;
     write_poll(get_connection(ctx), bind_executor(get_executor(ctx), std::forward<Continuation>(c)));
 }
 
 template <typename Continuation, typename ...Ts>
-inline void read_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
+void read_poll(const request_operation_context_ptr<Ts...>& ctx, Continuation&& c) {
     using asio::bind_executor;
     read_poll(get_connection(ctx), bind_executor(get_executor(ctx), std::forward<Continuation>(c)));
 }
@@ -154,14 +154,14 @@ struct async_send_query_params_op {
 };
 
 template <typename Context, typename BinaryQuery>
-inline auto make_async_send_query_params_op(Context&& ctx, BinaryQuery&& q) {
+auto make_async_send_query_params_op(Context&& ctx, BinaryQuery&& q) {
     return async_send_query_params_op<std::decay_t<Context>, std::decay_t<BinaryQuery>> {
         std::forward<Context>(ctx), std::forward<BinaryQuery>(q)
     };
 }
 
 template <typename T, typename ...Ts>
-inline decltype(auto) make_binary_query(const query_builder<Ts...>& builder, const oid_map_t<T>& m) {
+decltype(auto) make_binary_query(const query_builder<Ts...>& builder, const oid_map_t<T>& m) {
     return make_binary_query(builder.build(), m);
 }
 
@@ -278,7 +278,7 @@ struct async_get_result_op : boost::asio::coroutine {
 #include <boost/asio/unyield.hpp>
 
 template <typename Context, typename ResultProcessor>
-inline auto make_async_get_result_op(Context&& ctx, ResultProcessor&& process) {
+auto make_async_get_result_op(Context&& ctx, ResultProcessor&& process) {
     return async_get_result_op<std::decay_t<Context>, std::decay_t<ResultProcessor>>{
         std::forward<Context>(ctx),
         std::forward<ResultProcessor>(process)
@@ -286,7 +286,7 @@ inline auto make_async_get_result_op(Context&& ctx, ResultProcessor&& process) {
 }
 
 template <typename Context, typename ResultProcessor>
-inline void async_get_result(Context&& ctx, ResultProcessor&& process) {
+void async_get_result(Context&& ctx, ResultProcessor&& process) {
     make_async_get_result_op(
         std::forward<Context>(ctx),
         std::forward<ResultProcessor>(process)
@@ -335,7 +335,7 @@ auto make_async_request_out_handler(T&& out) {
 }
 
 template <typename Query, typename OutHandler, typename Handler>
-inline auto make_async_request_op(Query&& query, OutHandler&& out, Handler&& handler) {
+auto make_async_request_op(Query&& query, OutHandler&& out, Handler&& handler) {
     using result_type = impl::async_request_op<
         std::decay_t<OutHandler>,
         std::decay_t<Query>,
@@ -349,7 +349,7 @@ inline auto make_async_request_op(Query&& query, OutHandler&& out, Handler&& han
 }
 
 template <typename P, typename Q, typename Out, typename Handler>
-inline void async_request(P&& provider, Q&& query, Out&& out, Handler&& handler) {
+void async_request(P&& provider, Q&& query, Out&& out, Handler&& handler) {
     static_assert(ConnectionProvider<P>, "is not a ConnectionProvider");
     static_assert(Query<Q> || QueryBuilder<Q>, "is neither Query nor QueryBuilder");
     async_get_connection(std::forward<P>(provider),
