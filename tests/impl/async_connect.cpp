@@ -26,7 +26,7 @@ struct fixture {
             make_connection(connection, io, socket);
     StrictMock<callback_gmock<decltype(conn)>> callback{};
     StrictMock<steady_timer_gmock> timer;
-    steady_timer timer_wrapper {timer};
+    std::shared_ptr<steady_timer> timer_wrapper = std::make_shared<steady_timer>(steady_timer {timer});
     decltype(ozo::impl::make_connect_operation_context(conn, wrap(callback), timer_wrapper)) context;
 
     auto make_operation_context() {

@@ -14,10 +14,10 @@ struct connect_operation_context {
 
     ConnectionT connection;
     Handler handler;
-    Timer timer;
+    std::shared_ptr<Timer> timer;
     ozo::strand<decltype(get_io_context(connection))> strand {get_io_context(connection)};
 
-    connect_operation_context(ConnectionT connection, Handler handler, Timer timer)
+    connect_operation_context(ConnectionT connection, Handler handler, std::shared_ptr<Timer> timer)
             : connection(std::move(connection)),
               handler(std::move(handler)),
               timer(std::move(timer)) {}
@@ -27,12 +27,12 @@ template <typename ... Ts>
 using connect_operation_context_ptr = std::shared_ptr<connect_operation_context<Ts ...>>;
 
 template <typename Connection, typename Handler, typename Timer>
-auto make_connect_operation_context(Connection&& connection, Handler&& handler, Timer&& timer) {
-    using context_type = connect_operation_context<std::decay_t<Connection>, std::decay_t<Handler>, std::decay_t<Timer>>;
+auto make_connect_operation_context(Connection&& connection, Handler&& handler, std::shared_ptr<Timer> timer) {
+    using context_type = connect_operation_context<std::decay_t<Connection>, std::decay_t<Handler>, Timer>;
     return std::make_shared<context_type>(
         std::forward<Connection>(connection),
         std::forward<Handler>(handler),
-        std::forward<Timer>(timer)
+        std::move(timer)
     );
 }
 
@@ -58,7 +58,7 @@ auto& get_executor(const connect_operation_context_ptr<Ts ...>& context) {
 
 template <typename ... Ts>
 auto& get_timer(const connect_operation_context_ptr<Ts ...>& context) {
-    return context->timer;
+    return *context->timer;
 }
 
 template <typename Socket>
@@ -155,17 +155,38 @@ inline void request_oid_map(Connection&& conn, Handler&& handler) {
         .perform(std::forward<Connection>(conn));
 }
 
-template <typename Handler>
+template <typename Timer, typename Handler>
+struct cancel_timer_handler {
+    std::shared_ptr<Timer> timer;
+    Handler handler;
+
+    template <typename Connection>
+    void operator() (error_code ec, Connection&& connection) {
+        timer->cancel();
+        handler(ec, std::forward<Connection>(connection));
+    }
+};
+
+template <typename Timer, typename Handler>
+auto make_cancel_timer_handler(std::shared_ptr<Timer> timer, Handler&& handler) {
+    return cancel_timer_handler<Timer, std::decay_t<Handler>> {std::move(timer), std::forward<Handler>(handler)};
+}
+
+template <typename Timer, typename Handler>
 struct request_oid_map_handler {
+    std::shared_ptr<Timer> timer_;
     Handler handler_;
 
     template <typename Connection>
     void operator() (error_code ec, Connection&& conn) {
-        using namespace hana::literals;
         if (ec || empty(get_oid_map(conn))) {
+            timer_->cancel();
             handler_(std::move(ec), std::forward<Connection>(conn));
         } else {
-            request_oid_map(std::forward<Connection>(conn), std::move(handler_));
+            request_oid_map(
+                std::forward<Connection>(conn),
+                make_cancel_timer_handler(std::move(timer_), std::move(handler_))
+            );
         }
     }
 
@@ -176,19 +197,24 @@ struct request_oid_map_handler {
     }
 };
 
-template <typename Handler>
-inline auto make_request_oid_map_handler(Handler&& handler) {
-    return request_oid_map_handler<std::decay_t<Handler>> {std::forward<Handler>(handler)};
+template <typename Timer, typename Handler>
+auto make_request_oid_map_handler(std::shared_ptr<Timer> timer, Handler&& handler) {
+    using result_type = request_oid_map_handler<Timer, std::decay_t<Handler>>;
+    return result_type {std::move(timer), std::forward<Handler>(handler)};
 }
 
 template <typename ConnectionT, typename Handler>
 inline Require<Connection<ConnectionT>> async_connect(std::string conninfo, const time_traits::duration& timeout,
         ConnectionT&& connection, Handler&& handler) {
+    const auto timer = std::make_shared<asio::steady_timer>(get_io_context(connection));
     make_async_connect_op(
         make_connect_operation_context(
             std::forward<ConnectionT>(connection),
-            make_request_oid_map_handler(std::forward<Handler>(handler)),
-            asio::steady_timer(get_io_context(connection))
+            make_request_oid_map_handler(
+                timer,
+                std::forward<Handler>(handler)
+            ),
+            timer
         )
     ).perform(conninfo, timeout);
 }

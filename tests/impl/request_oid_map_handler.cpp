@@ -21,6 +21,7 @@ using namespace ozo::tests;
 
 using ozo::empty_oid_map;
 using ozo::error_code;
+using ozo::time_traits;
 
 struct connection_mock {
     MOCK_METHOD0(request_oid_map, void());
@@ -42,7 +43,9 @@ struct connection_wrapper {
 };
 
 struct request_oid_map_handler : Test {
-    StrictMock<connection_mock> connection{};
+    StrictMock<connection_mock> connection {};
+    StrictMock<steady_timer_gmock> timer {};
+    std::shared_ptr<steady_timer> timer_wrapper = std::make_shared<steady_timer>(steady_timer {timer});
 
     template <typename OidMap>
     auto make_connection(OidMap oid_map) {
@@ -61,26 +64,28 @@ TEST_F(request_oid_map_handler, should_request_for_oid_when_oid_map_is_not_empty
 
     EXPECT_CALL(connection, request_oid_map()).WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(wrap(callback))(error_code{}, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error_code{}, std::move(conn));
 }
 
 TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_is_not_empty_but_error_occured) {
     auto conn = make_connection(ozo::register_types<custom_type>());
     auto callback = make_callback(conn);
 
+    EXPECT_CALL(timer, cancel()).WillOnce(Return(1));
     EXPECT_CALL(callback, call(error_code{error::error}, _))
         .WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(wrap(callback))(error::error, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error::error, std::move(conn));
 }
 
 TEST_F(request_oid_map_handler, should_not_request_for_oid_when_oid_map_ist_empty) {
     auto conn = make_connection(ozo::register_types<>());
     auto callback = make_callback(conn);
 
+    EXPECT_CALL(timer, cancel()).WillOnce(Return(1));
     EXPECT_CALL(callback, call(error_code{}, _)).WillOnce(Return());
 
-    ozo::impl::make_request_oid_map_handler(wrap(callback))(error_code{}, std::move(conn));
+    ozo::impl::make_request_oid_map_handler(timer_wrapper, wrap(callback))(error_code{}, std::move(conn));
 }
 
 } // namespace
