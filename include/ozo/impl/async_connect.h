@@ -2,6 +2,7 @@
 
 #include <ozo/impl/io.h>
 #include <ozo/impl/request_oid_map.h>
+#include <ozo/impl/timeout_handler.h>
 #include <ozo/time_traits.h>
 #include <ozo/connection.h>
 
@@ -59,24 +60,6 @@ auto& get_executor(const connect_operation_context_ptr<Ts ...>& context) {
 template <typename ... Ts>
 auto& get_timer(const connect_operation_context_ptr<Ts ...>& context) {
     return *context->timer;
-}
-
-template <typename Socket>
-struct timeout_handler {
-    Socket& socket;
-
-    void operator() (error_code ec) {
-        if (ec == asio::error::operation_aborted) {
-            return;
-        } else {
-            socket.cancel(ec);
-        }
-    }
-};
-
-template <typename Socket>
-inline auto make_timeout_handler(Socket& socket) {
-    return timeout_handler<std::decay_t<Socket>> {socket};
 }
 
 /**
