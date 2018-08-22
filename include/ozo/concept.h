@@ -16,6 +16,10 @@ namespace ozo {
 /**
  * @defgroup Concepts
  * @brief Library-wide concepts emulation mechanism
+ *
+ * We decide to use Concept-style meta programming to make easy to extend, adapt and test the
+ * library. So here is our own reinvented wheel of C++ Concepts buit on template constants and
+ * std::enable_if.
  */
 ///@{
 /**
